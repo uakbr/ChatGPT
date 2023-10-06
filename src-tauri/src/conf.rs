@@ -1,175 +1,252 @@
-use crate::utils::{chat_root, create_file, exists};
-use anyhow::Result;
+use log::{error, info};
 use serde_json::Value;
-use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
+use std::{collections::BTreeMap, path::PathBuf};
 use tauri::{Manager, Theme};
 
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
 
-// pub const USER_AGENT: &str = "5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36";
-// pub const PHONE_USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1";
+use crate::utils::{app_root, create_file, exists};
 
+pub const APP_WEBSITE: &str = "https://lencx.github.io/app/";
+pub const APP_SPONSORS: &str = "https://lencx.github.io/app/sponsors";
 pub const ISSUES_URL: &str = "https://github.com/lencx/ChatGPT/issues";
+pub const NOFWL_APP: &str = "https://github.com/lencx/nofwl";
 pub const UPDATE_LOG_URL: &str = "https://github.com/lencx/ChatGPT/blob/main/UPDATE_LOG.md";
-pub const AWESOME_URL: &str = "https://github.com/lencx/ChatGPT/blob/main/AWESOME.md";
-pub const DEFAULT_CHAT_CONF: &str = r#"{
-    "stay_on_top": false,
-    "theme": "Light",
-    "titlebar": true,
-    "hide_dock_icon": false,
-    "default_origin": "https://chat.openai.com",
-    "origin": "https://chat.openai.com",
-    "ua_window": "",
-    "ua_tray": ""
-}"#;
-pub const DEFAULT_CHAT_CONF_MAC: &str = r#"{
-    "stay_on_top": false,
-    "theme": "Light",
-    "titlebar": false,
-    "hide_dock_icon": false,
-    "default_origin": "https://chat.openai.com",
-    "origin": "https://chat.openai.com",
-    "ua_window": "",
-    "ua_tray": ""
-}"#;
+// pub const BUY_COFFEE: &str = "https://www.buymeacoffee.com/lencx";
+pub const GITHUB_PROMPTS_CSV_URL: &str =
+  "https://raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv";
+pub const SCRIPTS_DIR: &str = "https://raw.githubusercontent.com/lencx/ChatGPT/main/scripts/";
 
-pub struct ChatState {
-    pub stay_on_top: Mutex<bool>,
+pub const APP_CONF_PATH: &str = "chat.conf.json";
+pub const CHATGPT_URL: &str = "https://chat.openai.com";
+pub const UA_MOBILE: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+
+macro_rules! pub_struct {
+  ($name:ident {$($field:ident: $t:ty,)*}) => {
+    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+    pub struct $name {
+      $(pub $field: $t),*
+    }
+  }
 }
 
-impl ChatState {
-    pub fn default(chat_conf: ChatConfJson) -> Self {
-        ChatState {
-            stay_on_top: Mutex::new(chat_conf.stay_on_top),
-        }
+pub_struct!(AppConf {
+  titlebar: bool,
+  hide_dock_icon: bool,
+  // macOS and Windows: light / dark / system
+  theme: String,
+  // auto update policy: prompt / silent / disable
+  auto_update: String,
+  stay_on_top: bool,
+  save_window_state: bool,
+  global_shortcut: Option<String>,
+  default_origin: String,
+  speech_lang: String,
+
+  // Main Window
+  isinit: bool,
+  popup_search: bool,
+  main_close: bool,
+  main_dashboard: bool,
+  main_origin: String,
+  ua_window: String,
+  main_width: f64,
+  main_height: f64,
+
+  // Tray Window
+  tray_width: f64,
+  tray_height: f64,
+  tray: bool,
+  tray_dashboard: bool,
+  tray_origin: String,
+  ua_tray: String,
+});
+
+impl AppConf {
+  pub fn new() -> Self {
+    info!("conf_init");
+    Self {
+      titlebar: !cfg!(target_os = "macos"),
+      hide_dock_icon: false,
+      save_window_state: true,
+      theme: "light".into(),
+      auto_update: "prompt".into(),
+      #[cfg(target_os = "macos")]
+      speech_lang: "com.apple.eloquence.en-US.Rocko".into(),
+      #[cfg(not(target_os = "macos"))]
+      speech_lang: "".into(),
+      tray: true,
+      popup_search: false,
+      isinit: true,
+      main_close: false,
+      stay_on_top: false,
+      main_dashboard: false,
+      tray_dashboard: false,
+      main_width: 800.0,
+      main_height: 600.0,
+      tray_width: 360.0,
+      tray_height: 540.0,
+      main_origin: CHATGPT_URL.into(),
+      tray_origin: CHATGPT_URL.into(),
+      default_origin: CHATGPT_URL.into(),
+      ua_tray: UA_MOBILE.into(),
+      ua_window: "".into(),
+      global_shortcut: None,
     }
+  }
+
+  pub fn file_path() -> PathBuf {
+    app_root().join(APP_CONF_PATH)
+  }
+
+  pub fn read() -> Self {
+    match std::fs::read_to_string(Self::file_path()) {
+      Ok(v) => {
+        if let Ok(v2) = serde_json::from_str::<AppConf>(&v) {
+          v2
+        } else {
+          error!("conf_read_parse_error");
+          Self::default()
+        }
+      }
+      Err(err) => {
+        error!("conf_read_error: {}", err);
+        Self::default()
+      }
+    }
+  }
+
+  pub fn write(self) -> Self {
+    let path = &Self::file_path();
+    if !exists(path) {
+      create_file(path).unwrap();
+      info!("conf_create");
+    }
+    if let Ok(v) = serde_json::to_string_pretty(&self) {
+      std::fs::write(path, v).unwrap_or_else(|err| {
+        error!("conf_write: {}", err);
+        Self::default().write();
+      });
+    } else {
+      error!("conf_ser");
+    }
+    self
+  }
+
+  pub fn amend(self, json: Value) -> Self {
+    let val = serde_json::to_value(&self).unwrap();
+    let mut config: BTreeMap<String, Value> = serde_json::from_value(val).unwrap();
+    let new_json: BTreeMap<String, Value> = serde_json::from_value(json).unwrap();
+
+    for (k, v) in new_json {
+      config.insert(k, v);
+    }
+
+    match serde_json::to_string_pretty(&config) {
+      Ok(v) => match serde_json::from_str::<AppConf>(&v) {
+        Ok(v) => v,
+        Err(err) => {
+          error!("conf_amend_parse: {}", err);
+          self
+        }
+      },
+      Err(err) => {
+        error!("conf_amend_str: {}", err);
+        self
+      }
+    }
+  }
+
+  #[cfg(target_os = "macos")]
+  pub fn titlebar(self) -> TitleBarStyle {
+    if self.titlebar {
+      TitleBarStyle::Transparent
+    } else {
+      TitleBarStyle::Overlay
+    }
+  }
+
+  pub fn theme_mode() -> Theme {
+    match Self::get_theme().as_str() {
+      "system" => match dark_light::detect() {
+        // Dark mode
+        dark_light::Mode::Dark => Theme::Dark,
+        // Light mode
+        dark_light::Mode::Light => Theme::Light,
+        // Unspecified
+        dark_light::Mode::Default => Theme::Light,
+      },
+      "dark" => Theme::Dark,
+      _ => Theme::Light,
+    }
+  }
+
+  pub fn get_theme() -> String {
+    Self::read().theme.to_lowercase()
+  }
+
+  pub fn get_auto_update(self) -> String {
+    self.auto_update.to_lowercase()
+  }
+
+  pub fn theme_check(self, mode: &str) -> bool {
+    self.theme.to_lowercase() == mode
+  }
+
+  pub fn restart(self, app: tauri::AppHandle) {
+    tauri::api::process::restart(&app.env());
+  }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct ChatConfJson {
-    // support macOS only
-    pub titlebar: bool,
-    pub hide_dock_icon: bool,
-
-    // macOS and Windows
-    pub theme: String,
-
-    pub stay_on_top: bool,
-    pub default_origin: String,
-    pub origin: String,
-    pub ua_window: String,
-    pub ua_tray: String,
+impl Default for AppConf {
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
-impl ChatConfJson {
-    /// init chat.conf.json
-    /// path: ~/.chatgpt/chat.conf.json
-    pub fn init() -> PathBuf {
-        let conf_file = ChatConfJson::conf_path();
-        let content = if cfg!(target_os = "macos") {
-            DEFAULT_CHAT_CONF_MAC
-        } else {
-            DEFAULT_CHAT_CONF
-        };
+pub mod cmd {
+  use super::AppConf;
+  use tauri::{command, AppHandle, Manager};
 
-        if !exists(&conf_file) {
-            create_file(&conf_file).unwrap();
-            fs::write(&conf_file, content).unwrap();
-            return conf_file;
+  #[command]
+  pub fn get_app_conf() -> AppConf {
+    AppConf::read()
+  }
+
+  #[command]
+  pub fn reset_app_conf() -> AppConf {
+    AppConf::default().write()
+  }
+
+  #[command]
+  pub fn get_theme() -> String {
+    AppConf::get_theme()
+  }
+
+  #[command]
+  pub fn form_confirm(_app: AppHandle, data: serde_json::Value) {
+    AppConf::read().amend(serde_json::json!(data)).write();
+  }
+
+  #[command]
+  pub fn form_cancel(app: AppHandle, label: &str, title: &str, msg: &str) {
+    let win = app.app_handle().get_window(label).unwrap();
+    tauri::api::dialog::ask(
+      app.app_handle().get_window(label).as_ref(),
+      title,
+      msg,
+      move |is_cancel| {
+        if is_cancel {
+          win.close().unwrap();
         }
+      },
+    );
+  }
 
-        let conf_file = ChatConfJson::conf_path();
-        let file_content = fs::read_to_string(&conf_file).unwrap();
-        match serde_json::from_str(&file_content) {
-            Ok(v) => v,
-            Err(err) => {
-                if err.to_string() == "invalid type: map, expected unit at line 1 column 0" {
-                    return conf_file;
-                }
-                fs::write(&conf_file, content).unwrap();
-            }
-        };
-
-        conf_file
-    }
-
-    pub fn conf_path() -> PathBuf {
-        chat_root().join("chat.conf.json")
-    }
-
-    pub fn get_chat_conf() -> Self {
-        let conf_file = ChatConfJson::conf_path();
-        let file_content = fs::read_to_string(&conf_file).unwrap();
-        let content = if cfg!(target_os = "macos") {
-            DEFAULT_CHAT_CONF_MAC
-        } else {
-            DEFAULT_CHAT_CONF
-        };
-
-        match serde_json::from_value(match serde_json::from_str(&file_content) {
-            Ok(v) => v,
-            Err(_) => {
-                fs::write(&conf_file, content).unwrap();
-                serde_json::from_str(content).unwrap()
-            }
-        }) {
-            Ok(v) => v,
-            Err(_) => {
-                fs::write(&conf_file, content).unwrap();
-                serde_json::from_value(serde_json::from_str(content).unwrap()).unwrap()
-            }
-        }
-    }
-
-    // https://users.rust-lang.org/t/updating-object-fields-given-dynamic-json/39049/3
-    pub fn amend(new_rules: &Value, app: Option<tauri::AppHandle>) -> Result<()> {
-        let config = ChatConfJson::get_chat_conf();
-        let config: Value = serde_json::to_value(&config)?;
-        let mut config: BTreeMap<String, Value> = serde_json::from_value(config)?;
-        let new_rules: BTreeMap<String, Value> = serde_json::from_value(new_rules.clone())?;
-
-        for (k, v) in new_rules {
-            config.insert(k, v);
-        }
-
-        fs::write(
-            ChatConfJson::conf_path(),
-            serde_json::to_string_pretty(&config)?,
-        )?;
-
-        if let Some(handle) = app {
-            tauri::api::process::restart(&handle.env());
-            // tauri::api::dialog::ask(
-            //     handle.get_window("core").as_ref(),
-            //     "ChatGPT Restart",
-            //     "Whether to restart immediately?",
-            //     move |is_restart| {
-            //         if is_restart {
-            //         }
-            //     },
-            // );
-        }
-
-        Ok(())
-    }
-
-    pub fn theme() -> Option<Theme> {
-        let conf = ChatConfJson::get_chat_conf();
-        if conf.theme == "Dark" {
-            Some(Theme::Dark)
-        } else {
-            Some(Theme::Light)
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    pub fn titlebar() -> TitleBarStyle {
-        let conf = ChatConfJson::get_chat_conf();
-        if conf.titlebar {
-            TitleBarStyle::Transparent
-        } else {
-            TitleBarStyle::Overlay
-        }
-    }
+  #[command]
+  pub fn form_msg(app: AppHandle, label: &str, title: &str, msg: &str) {
+    let win = app.app_handle().get_window(label);
+    tauri::api::dialog::message(win.as_ref(), title, msg);
+  }
 }

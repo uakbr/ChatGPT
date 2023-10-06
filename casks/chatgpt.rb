@@ -1,8 +1,14 @@
 cask "chatgpt" do
-   version "0.6.10"
-   sha256 "e85062565f826d32219c53b184d6df9c89441d4231cdfff775c2de8c50ac9906"
+  version "1.0.0"
+  arch = Hardware::CPU.arch.to_s
+  sha256s = {
+    "x86_64" => "474c6024ac1100512c242449da8d93b521334d0d03a9457c42446293a64eaff4",
+    "aarch64" => "998d15813194957de140a530605252fdf3f68fafdba1353706fa00d070c7c23d"
+  }
+  if arch == "arm64" then arch = "aarch64" end
+  url "https://github.com/lencx/ChatGPT/releases/download/v#{version}/ChatGPT_#{version}_macos_#{arch}.dmg"
+  sha256 sha256s[arch]
 
-  url "https://github.com/lencx/ChatGPT/releases/download/v#{version}/ChatGPT_#{version}_x64.dmg"
   name "ChatGPT"
   desc "Desktop wrapper for OpenAI ChatGPT"
   homepage "https://github.com/lencx/ChatGPT#readme"

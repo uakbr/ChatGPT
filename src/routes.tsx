@@ -1,22 +1,30 @@
 import { useRoutes } from 'react-router-dom';
 import {
-  DesktopOutlined,
+  SettingOutlined,
   BulbOutlined,
   SyncOutlined,
   FileSyncOutlined,
   UserOutlined,
+  FormOutlined,
+  InfoCircleOutlined,
+  CodeOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 
-import General from '@view/General';
-import UserCustom from '@/view/model/UserCustom';
-import SyncPrompts from '@/view/model/SyncPrompts';
-import SyncCustom from '@/view/model/SyncCustom';
-import SyncRecord from '@/view/model/SyncRecord';
+import Settings from '@/view/settings';
+import About from '@/view/about';
+import Scripts from '@/view/scripts';
+import ScriptsEditor from '@/view/scripts/Editor';
+import UserCustom from '@/view/prompts/UserCustom';
+import SyncPrompts from '@/view/prompts/SyncPrompts';
+import SyncCustom from '@/view/prompts/SyncCustom';
+import SyncRecord from '@/view/prompts/SyncRecord';
+import Notes from '@/view/notes';
+import Markdown from '@/view/markdown';
 
 export type ChatRouteMetaObject = {
   label: string;
-  icon?: React.ReactNode,
+  icon?: React.ReactNode;
 };
 
 type ChatRouteObject = {
@@ -25,21 +33,34 @@ type ChatRouteObject = {
   hideMenu?: boolean;
   meta?: ChatRouteMetaObject;
   children?: ChatRouteObject[];
-}
+};
 
 export const routes: Array<ChatRouteObject> = [
   {
-    path: '/',
-    element: <General />,
+    path: '/settings',
+    element: <Settings />,
     meta: {
-      label: 'General',
-      icon: <DesktopOutlined />,
+      label: 'Settings',
+      icon: <SettingOutlined />,
     },
   },
   {
-    path: '/model',
+    path: '/notes',
+    element: <Notes />,
     meta: {
-      label: 'Language Model',
+      label: 'Notes',
+      icon: <FormOutlined />,
+    },
+  },
+  {
+    path: '/md/:id',
+    element: <Markdown />,
+    hideMenu: true,
+  },
+  {
+    path: '/prompts',
+    meta: {
+      label: 'Prompts',
       icon: <BulbOutlined />,
     },
     children: [
@@ -51,6 +72,7 @@ export const routes: Array<ChatRouteObject> = [
           icon: <UserOutlined />,
         },
       },
+      // --- Sync
       {
         path: 'sync-prompts',
         element: <SyncPrompts />,
@@ -72,19 +94,44 @@ export const routes: Array<ChatRouteObject> = [
         element: <SyncRecord />,
         hideMenu: true,
       },
-    ]
+    ],
+  },
+  {
+    path: '/scripts',
+    element: <Scripts />,
+    meta: {
+      label: 'Scripts',
+      icon: <CodeOutlined />,
+    },
+  },
+  {
+    path: '/scripts/:id',
+    element: <ScriptsEditor />,
+    hideMenu: true,
+  },
+  {
+    path: '/about',
+    element: <About />,
+    meta: {
+      label: 'About',
+      icon: <InfoCircleOutlined />,
+    },
+  },
+  {
+    path: '/',
+    element: <Settings />,
   },
 ];
 
 type MenuItem = Required<MenuProps>['items'][number];
 export const menuItems: MenuItem[] = routes
   .filter((j) => !j.hideMenu)
-  .map(i => ({
+  .map((i) => ({
     ...i.meta,
     key: i.path || '',
     children: i?.children
       ?.filter((j) => !j.hideMenu)
-      ?.map((j) => ({ ...j.meta, key: `${i.path}/${j.path}` || ''})),
+      ?.map((j) => ({ ...j.meta, key: `${i.path}/${j.path}` || '' })),
   }));
 
 export default () => {
